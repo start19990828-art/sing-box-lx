@@ -414,75 +414,9 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
-  build_android:
-    name: build android (libbox.aar)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          fetch-depth: 0
-
-      # SPEC 044: the AAR MUST be built with Go >= 1.25. A go1.24-built libbox
-      # kills every quic-go outbound (hysteria2/tuic/masque-h3) on some vendor
-      # Android kernels inside the VPN process — "context deadline exceeded"
-      # on each dial while TCP and wireguard-go UDP work (device-verified on
-      # OnePlus Nord CE 2 / MTK / Android 15; the same source built with
-      # go1.25.5 works on the same device, GSO/ECN knobs ruled out). go.mod
-      # still says `go 1.24.x` (upstream parity), so go-version-file would
-      # silently downgrade the toolchain here — the pin lives in go.version
-      # (SPEC 049), which F-Droid also reads to build the AAR from source.
-      - name: Go toolchain pin
-        id: go_pin
-        run: echo "version=$(tr -d '[:space:]' < go.version | sed 's/^go//')" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-go@v6
-        with:
-          go-version: ${{ steps.go_pin.outputs.version }}
-
-      - name: Setup Android NDK
-        id: setup-ndk
-        uses: nttld/setup-ndk@v1
-        with:
-          # lx: r28c = 28.2.13676358 — совпадает с локальным NDK. Прежнее `r28` не
-          # алиас на последнюю ревизию, а отдельный архив от 05.02.2025.
-          ndk-version: r28c
-
-      - name: Setup OpenJDK 17
-        run: sudo apt-get update && sudo apt-get install -y openjdk-17-jdk-headless
-
-      - name: Resolve version
-        id: ver
-        run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-          # build_libbox stamps Libbox.version() from `git describe` — ensure the tag exists.
-          git tag "$TAG" -f
-
-      - name: Build libbox.aar (with_xhttp + with_awg baked in by build_libbox)
-        run: |
-          make lib_install
-          export PATH="$PATH:$(go env GOPATH)/bin"
-          make lib_android
-        env:
-          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-
-      - name: Package AARs
-        run: |
-          mkdir -p dist
-          V="${{ steps.ver.outputs.version }}"
-          cp libbox.aar "dist/libbox-$V.aar"
-          cp libbox-legacy.aar "dist/libbox-legacy-$V.aar"
-
-      - uses: actions/upload-artifact@v6
-        with:
-          name: dist-android
-          path: dist/*
-          if-no-files-found: error
-
   release:
     name: publish release
-    needs: [build, build_darwin, build_linux_musl, build_android]
+    needs: [build, build_darwin, build_linux_musl]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
